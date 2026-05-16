@@ -2,15 +2,45 @@ openapi: 3.0.3
 info:
   title: ImageProcessor API
   version: 0.1.0
+  description: HTTP API for uploading images, tracking background processing and downloading processed results.
+servers:
+  - url: http://localhost:8080
 paths:
+  /health:
+    get:
+      tags: [System]
+      summary: Health check
+      responses:
+        "200":
+          description: API is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
   /images:
     get:
+      tags: [Images]
       summary: List uploaded images and processing statuses
       responses:
         "200":
           description: Image list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Image"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /upload:
     post:
+      tags: [Images]
       summary: Upload image and enqueue background processing
       requestBody:
         required: true
@@ -23,20 +53,43 @@ paths:
                 image:
                   type: string
                   format: binary
+                  description: JPG, PNG or GIF image.
       responses:
         "202":
           description: Image accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Image"
         "400":
-          description: Invalid upload
+          $ref: "#/components/responses/BadRequest"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /status/{id}:
+    get:
+      tags: [Images]
+      summary: Get image processing status
+      parameters:
+        - $ref: "#/components/parameters/ImageID"
+      responses:
+        "200":
+          description: Image status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Image"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /image/{id}:
     get:
+      tags: [Images]
       summary: Get processed image or current processing state
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
+        - $ref: "#/components/parameters/ImageID"
       responses:
         "200":
           description: Processed image
@@ -47,28 +100,31 @@ paths:
                 format: binary
         "202":
           description: Image is not processed yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Image"
         "404":
-          description: Image not found
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
     delete:
+      tags: [Images]
       summary: Delete image and metadata
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
+        - $ref: "#/components/parameters/ImageID"
       responses:
         "204":
           description: Deleted
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /image/{id}/thumbnail:
     get:
+      tags: [Images]
       summary: Get processed thumbnail or current processing state
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
+        - $ref: "#/components/parameters/ImageID"
       responses:
         "200":
           description: Processed thumbnail
@@ -79,23 +135,90 @@ paths:
                 format: binary
         "202":
           description: Image is not processed yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Image"
         "404":
-          description: Image not found
-  /status/{id}:
-    get:
-      summary: Get image processing status
-      parameters:
-        - name: id
-          in: path
-          required: true
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+components:
+  parameters:
+    ImageID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      example: 49b2b0f0-64d3-4e77-82da-e0df4aa3187f
+
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
           schema:
-            type: string
-      responses:
-        "200":
-          description: Image status
-  /health:
-    get:
-      summary: Health check
-      responses:
-        "200":
-          description: API is healthy
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: Image not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    ServiceUnavailable:
+      description: Queue is unavailable
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+  schemas:
+    Image:
+      type: object
+      required:
+        - id
+        - originalName
+        - contentType
+        - status
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        originalName:
+          type: string
+          example: photo.png
+        contentType:
+          type: string
+          enum: [image/jpeg, image/png, image/gif]
+        status:
+          $ref: "#/components/schemas/ImageStatus"
+        error:
+          type: string
+          example: failed to decode image
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    ImageStatus:
+      type: string
+      enum: [queued, processing, done, failed]
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          example: image not found

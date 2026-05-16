@@ -1,7 +1,10 @@
 const API_URL = window.API_URL || "http://localhost:8080";
 const form = document.querySelector("#upload-form");
 const input = document.querySelector("#image-input");
+const uploadButton = document.querySelector("#upload-button");
 const gallery = document.querySelector("#gallery");
+const message = document.querySelector("#message");
+const emptyState = document.querySelector("#empty-state");
 const template = document.querySelector("#image-card-template");
 const items = new Map();
 
@@ -16,35 +19,48 @@ form.addEventListener("submit", async (event) => {
   const body = new FormData();
   body.append("image", input.files[0]);
 
-  const response = await fetch(`${API_URL}/upload`, {
-    method: "POST",
-    body,
-  });
-  if (!response.ok) {
-    alert("Не удалось загрузить изображение");
-    return;
+  setMessage("");
+  setUploading(true);
+  try {
+    const response = await fetch(`${API_URL}/upload`, {
+      method: "POST",
+      body,
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      setMessage(payload.error || "Не удалось загрузить изображение");
+      return;
+    }
+    const image = await response.json();
+    input.value = "";
+    renderCard(image);
+    pollStatus(image.id);
+  } finally {
+    setUploading(false);
   }
-  const image = await response.json();
-  input.value = "";
-  renderCard(image);
-  pollStatus(image.id);
 });
 
 async function loadImages() {
-  const response = await fetch(`${API_URL}/images`);
-  if (!response.ok) {
-    return;
-  }
-
-  const images = await response.json();
-  images.forEach((image) => {
-    renderCard(image);
-    if (image.status === "done") {
-      showReady(image.id);
-    } else if (image.status !== "failed") {
-      pollStatus(image.id);
+  try {
+    const response = await fetch(`${API_URL}/images`);
+    if (!response.ok) {
+      setMessage("API пока недоступен");
+      return;
     }
-  });
+
+    const images = await response.json();
+    images.reverse().forEach((image) => {
+      renderCard(image);
+      if (image.status === "done") {
+        showReady(image.id);
+      } else if (image.status !== "failed") {
+        pollStatus(image.id);
+      }
+    });
+  } catch {
+    setMessage("API пока недоступен");
+  }
+  syncEmptyState();
 }
 
 function renderCard(image) {
@@ -57,15 +73,19 @@ function renderCard(image) {
   const del = fragment.querySelector(".delete");
 
   name.textContent = image.originalName || image.id;
-  status.textContent = statusText(image.status);
+  setStatus({ status }, image.status);
   del.addEventListener("click", async () => {
-    await fetch(`${API_URL}/image/${image.id}`, { method: "DELETE" });
-    card.remove();
-    items.delete(image.id);
+    const response = await fetch(`${API_URL}/image/${image.id}`, { method: "DELETE" });
+    if (!response.ok) {
+      setMessage("Не удалось удалить изображение");
+      return;
+    }
+    removeCard(image.id);
   });
 
   gallery.prepend(card);
   items.set(image.id, { card, preview, img, status });
+  syncEmptyState();
 }
 
 async function pollStatus(id) {
@@ -81,7 +101,7 @@ async function pollStatus(id) {
   }
 
   const image = await response.json();
-  item.status.textContent = statusText(image.status);
+  setStatus(item, image.status);
 
   if (image.status === "done") {
     showReady(id);
@@ -100,6 +120,35 @@ function showReady(id) {
   }
   item.preview.classList.add("ready");
   item.img.src = `${API_URL}/image/${id}/thumbnail?v=${Date.now()}`;
+}
+
+function removeCard(id) {
+  const item = items.get(id);
+  if (!item) {
+    return;
+  }
+  item.card.remove();
+  items.delete(id);
+  syncEmptyState();
+}
+
+function setStatus(item, status) {
+  item.status.textContent = statusText(status);
+  item.status.classList.toggle("failed", status === "failed");
+}
+
+function setUploading(isUploading) {
+  uploadButton.disabled = isUploading;
+  uploadButton.textContent = isUploading ? "Загрузка" : "Загрузить";
+}
+
+function setMessage(text) {
+  message.textContent = text;
+  message.hidden = !text;
+}
+
+function syncEmptyState() {
+  emptyState.hidden = items.size > 0;
 }
 
 function statusText(status) {
