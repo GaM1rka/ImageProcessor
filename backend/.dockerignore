@@ -1,0 +1,5 @@
+.git
+data
+tmp
+bin
+**/*_test.go

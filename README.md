@@ -21,7 +21,8 @@ docker compose up --build
 
 - frontend: http://localhost:3000
 - API: http://localhost:8080
-- OpenAPI: `docs/openapi.yaml`
+- Swagger UI: http://localhost:8081
+- OpenAPI файл: `docs/openapi.yaml`
 
 ## API
 

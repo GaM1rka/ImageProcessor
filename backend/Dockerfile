@@ -14,3 +14,4 @@ COPY --from=build /bin/api /usr/local/bin/api
 COPY --from=build /bin/worker /usr/local/bin/worker
 RUN mkdir -p /app/data
 EXPOSE 8080
+CMD ["api"]

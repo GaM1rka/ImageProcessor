@@ -13,6 +13,11 @@ services:
       ALLOW_PLAINTEXT_LISTENER: "yes"
     ports:
       - "9092:9092"
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   api:
     build:
@@ -28,7 +33,13 @@ services:
     ports:
       - "8080:8080"
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
   worker:
     build:
@@ -42,7 +53,8 @@ services:
     volumes:
       - image-data:/app/data
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
 
   frontend:
     image: nginx:1.27-alpine
@@ -51,7 +63,20 @@ services:
     ports:
       - "3000:80"
     depends_on:
-      - api
+      api:
+        condition: service_healthy
+
+  swagger:
+    image: swaggerapi/swagger-ui:v5.17.14
+    environment:
+      SWAGGER_JSON: /openapi/openapi.yaml
+    volumes:
+      - ./docs/openapi.yaml:/openapi/openapi.yaml:ro
+    ports:
+      - "8081:8080"
+    depends_on:
+      api:
+        condition: service_healthy
 
 volumes:
   image-data:

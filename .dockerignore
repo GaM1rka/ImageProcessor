@@ -1,0 +1,7 @@
+.git
+.gitignore
+backend/data
+**/.DS_Store
+**/node_modules
+**/dist
+**/tmp
