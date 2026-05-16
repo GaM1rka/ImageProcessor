@@ -32,3 +32,10 @@ docker compose up --build
 - `GET /image/{id}` — готовое обработанное изображение или `202`, если оно еще в работе.
 - `GET /image/{id}/thumbnail` — готовая миниатюра.
 - `DELETE /image/{id}` — удалить исходник, результат, миниатюру и метаданные.
+
+## Проверка
+
+```bash
+cd backend
+GOCACHE=/tmp/imageprocessor-go-cache go test ./...
+```
