@@ -5,6 +5,8 @@ const gallery = document.querySelector("#gallery");
 const template = document.querySelector("#image-card-template");
 const items = new Map();
 
+loadImages();
+
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!input.files.length) {
@@ -18,11 +20,32 @@ form.addEventListener("submit", async (event) => {
     method: "POST",
     body,
   });
+  if (!response.ok) {
+    alert("Не удалось загрузить изображение");
+    return;
+  }
   const image = await response.json();
   input.value = "";
   renderCard(image);
   pollStatus(image.id);
 });
+
+async function loadImages() {
+  const response = await fetch(`${API_URL}/images`);
+  if (!response.ok) {
+    return;
+  }
+
+  const images = await response.json();
+  images.forEach((image) => {
+    renderCard(image);
+    if (image.status === "done") {
+      showReady(image.id);
+    } else if (image.status !== "failed") {
+      pollStatus(image.id);
+    }
+  });
+}
 
 function renderCard(image) {
   const fragment = template.content.cloneNode(true);
@@ -61,14 +84,22 @@ async function pollStatus(id) {
   item.status.textContent = statusText(image.status);
 
   if (image.status === "done") {
-    item.preview.classList.add("ready");
-    item.img.src = `${API_URL}/image/${id}?v=${Date.now()}`;
+    showReady(id);
     return;
   }
 
   if (image.status !== "failed") {
     window.setTimeout(() => pollStatus(id), 1500);
   }
+}
+
+function showReady(id) {
+  const item = items.get(id);
+  if (!item) {
+    return;
+  }
+  item.preview.classList.add("ready");
+  item.img.src = `${API_URL}/image/${id}/thumbnail?v=${Date.now()}`;
 }
 
 function statusText(status) {

@@ -22,7 +22,7 @@ type FileStore struct {
 }
 
 func NewFileStore(root string) (*FileStore, error) {
-	for _, dir := range []string{"originals", "processed", "meta"} {
+	for _, dir := range []string{"originals", "processed", "thumbnails", "meta"} {
 		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
 			return nil, err
 		}
@@ -69,6 +69,24 @@ func (s *FileStore) OpenProcessed(ctx context.Context, id string) (io.ReadCloser
 	return openExisting(filepath.Join(s.root, "processed", id+".jpg"))
 }
 
+func (s *FileStore) SaveThumbnail(ctx context.Context, id string, reader io.Reader) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return writeFile(filepath.Join(s.root, "thumbnails", id+".jpg"), reader)
+}
+
+func (s *FileStore) OpenThumbnail(ctx context.Context, id string) (io.ReadCloser, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return openExisting(filepath.Join(s.root, "thumbnails", id+".jpg"))
+}
+
 func (s *FileStore) Get(ctx context.Context, id string) (models.Image, error) {
 	if err := ctx.Err(); err != nil {
 		return models.Image{}, err
@@ -91,6 +109,34 @@ func (s *FileStore) Get(ctx context.Context, id string) (models.Image, error) {
 		return models.Image{}, err
 	}
 	return image, nil
+}
+
+func (s *FileStore) List(ctx context.Context) ([]models.Image, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	entries, err := os.ReadDir(filepath.Join(s.root, "meta"))
+	if err != nil {
+		return nil, err
+	}
+
+	images := make([]models.Image, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+
+		image, err := s.readMeta(entry.Name()[:len(entry.Name())-len(".json")])
+		if err != nil {
+			return nil, err
+		}
+		images = append(images, image)
+	}
+	return images, nil
 }
 
 func (s *FileStore) UpdateStatus(ctx context.Context, id string, status models.Status, message string) error {
@@ -122,6 +168,7 @@ func (s *FileStore) Delete(ctx context.Context, id string) error {
 	for _, path := range []string{
 		filepath.Join(s.root, "originals", id),
 		filepath.Join(s.root, "processed", id+".jpg"),
+		filepath.Join(s.root, "thumbnails", id+".jpg"),
 		s.metaPath(id),
 	} {
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {

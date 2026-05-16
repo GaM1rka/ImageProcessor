@@ -1,9 +1,12 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
+	"sort"
 	"time"
 
 	"imageprocessor/backend/internal/models"
@@ -30,9 +33,12 @@ func (h *Handler) Routes() http.Handler {
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
+	r.Use(cors)
 
 	r.Post("/upload", h.upload)
+	r.Get("/images", h.listImages)
 	r.Get("/image/{id}", h.getImage)
+	r.Get("/image/{id}/thumbnail", h.getThumbnail)
 	r.Delete("/image/{id}", h.deleteImage)
 	r.Get("/status/{id}", h.getStatus)
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -55,17 +61,23 @@ func (h *Handler) upload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
+	reader, contentType, err := validateImage(file)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	now := time.Now().UTC()
 	image := models.Image{
 		ID:           uuid.NewString(),
 		OriginalName: header.Filename,
-		ContentType:  header.Header.Get("Content-Type"),
+		ContentType:  contentType,
 		Status:       models.StatusQueued,
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
 
-	if err := h.store.SaveOriginal(r.Context(), image, file); err != nil {
+	if err := h.store.SaveOriginal(r.Context(), image, reader); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save image")
 		return
 	}
@@ -77,6 +89,18 @@ func (h *Handler) upload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusAccepted, image)
+}
+
+func (h *Handler) listImages(w http.ResponseWriter, r *http.Request) {
+	images, err := h.store.List(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list images")
+		return
+	}
+	sort.Slice(images, func(i, j int) bool {
+		return images[i].CreatedAt.After(images[j].CreatedAt)
+	})
+	writeJSON(w, http.StatusOK, images)
 }
 
 func (h *Handler) getImage(w http.ResponseWriter, r *http.Request) {
@@ -106,8 +130,37 @@ func (h *Handler) getImage(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	w.Header().Set("Content-Type", "image/jpeg")
-	http.ServeContent(w, r, id+".jpg", image.UpdatedAt, file)
+	serveJPEG(w, file)
+}
+
+func (h *Handler) getThumbnail(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	image, err := h.store.Get(r.Context(), id)
+	if errors.Is(err, storage.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "image not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get image")
+		return
+	}
+	if image.Status != models.StatusDone {
+		writeJSON(w, http.StatusAccepted, image)
+		return
+	}
+
+	file, err := h.store.OpenThumbnail(r.Context(), id)
+	if errors.Is(err, storage.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "thumbnail not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to open thumbnail")
+		return
+	}
+	defer file.Close()
+
+	serveJPEG(w, file)
 }
 
 func (h *Handler) getStatus(w http.ResponseWriter, r *http.Request) {
@@ -139,4 +192,39 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
+}
+
+func serveJPEG(w http.ResponseWriter, reader io.Reader) {
+	w.Header().Set("Content-Type", "image/jpeg")
+	_, _ = io.Copy(w, reader)
+}
+
+func validateImage(reader io.Reader) (io.Reader, string, error) {
+	head := make([]byte, 512)
+	n, err := io.ReadFull(reader, head)
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
+		return nil, "", err
+	}
+	head = head[:n]
+
+	contentType := http.DetectContentType(head)
+	switch contentType {
+	case "image/jpeg", "image/png", "image/gif":
+		return io.MultiReader(bytes.NewReader(head), reader), contentType, nil
+	default:
+		return nil, "", errors.New("only jpg, png and gif images are supported")
+	}
+}
+
+func cors(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }

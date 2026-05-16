@@ -7,7 +7,7 @@
 - `backend/cmd/api` — HTTP API для загрузки, получения статуса, выдачи и удаления изображений.
 - `backend/cmd/worker` — фоновый обработчик задач из Kafka.
 - `backend/internal/storage` — файловое хранилище исходников, результатов и JSON-метаданных.
-- `backend/internal/processor` — resize, подготовка результата и watermark.
+- `backend/internal/processor` — resize, генерация миниатюры и watermark.
 - `frontend` — один экран на HTML/CSS/JS.
 - `docs/openapi.yaml` — OpenAPI/Swagger описание.
 
@@ -22,3 +22,12 @@ docker compose up --build
 - frontend: http://localhost:3000
 - API: http://localhost:8080
 - OpenAPI: `docs/openapi.yaml`
+
+## API
+
+- `POST /upload` — загрузить `jpg`, `png` или `gif` в поле `image`.
+- `GET /images` — список изображений и их статусы.
+- `GET /status/{id}` — статус одной задачи.
+- `GET /image/{id}` — готовое обработанное изображение или `202`, если оно еще в работе.
+- `GET /image/{id}/thumbnail` — готовая миниатюра.
+- `DELETE /image/{id}` — удалить исходник, результат, миниатюру и метаданные.

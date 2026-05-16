@@ -38,13 +38,17 @@ func (p *Processor) Handle(ctx context.Context, message models.ProcessMessage) e
 	}
 	defer original.Close()
 
-	processed, err := processImage(original)
+	result, err := processImage(original)
 	if err != nil {
 		_ = p.store.UpdateStatus(ctx, message.ID, models.StatusFailed, err.Error())
 		return err
 	}
 
-	if err := p.store.SaveProcessed(ctx, message.ID, bytes.NewReader(processed)); err != nil {
+	if err := p.store.SaveProcessed(ctx, message.ID, bytes.NewReader(result.Processed)); err != nil {
+		_ = p.store.UpdateStatus(ctx, message.ID, models.StatusFailed, err.Error())
+		return err
+	}
+	if err := p.store.SaveThumbnail(ctx, message.ID, bytes.NewReader(result.Thumbnail)); err != nil {
 		_ = p.store.UpdateStatus(ctx, message.ID, models.StatusFailed, err.Error())
 		return err
 	}
@@ -52,20 +56,30 @@ func (p *Processor) Handle(ctx context.Context, message models.ProcessMessage) e
 	return p.store.UpdateStatus(ctx, message.ID, models.StatusDone, "")
 }
 
-func processImage(reader io.Reader) ([]byte, error) {
+type result struct {
+	Processed []byte
+	Thumbnail []byte
+}
+
+func processImage(reader io.Reader) (result, error) {
 	src, _, err := image.Decode(reader)
 	if err != nil {
-		return nil, err
+		return result{}, err
 	}
 
 	resized := resizeToFit(src, 1200, 1200)
 	withWatermark := addWatermark(resized, "ImageProcessor")
+	thumbnail := resizeToFill(src, 320, 240)
 
-	var out bytes.Buffer
-	if err := jpeg.Encode(&out, withWatermark, &jpeg.Options{Quality: 88}); err != nil {
-		return nil, err
+	processedBytes, err := encodeJPEG(withWatermark, 88)
+	if err != nil {
+		return result{}, err
 	}
-	return out.Bytes(), nil
+	thumbnailBytes, err := encodeJPEG(thumbnail, 82)
+	if err != nil {
+		return result{}, err
+	}
+	return result{Processed: processedBytes, Thumbnail: thumbnailBytes}, nil
 }
 
 func resizeToFit(src image.Image, maxWidth int, maxHeight int) image.Image {
@@ -81,6 +95,21 @@ func resizeToFit(src image.Image, maxWidth int, maxHeight int) image.Image {
 	dstHeight := int(float64(height) * scale)
 	dst := image.NewRGBA(image.Rect(0, 0, dstWidth, dstHeight))
 	xdraw.CatmullRom.Scale(dst, dst.Bounds(), src, bounds, xdraw.Over, nil)
+	return dst
+}
+
+func resizeToFill(src image.Image, width int, height int) image.Image {
+	bounds := src.Bounds()
+	scale := math.Max(float64(width)/float64(bounds.Dx()), float64(height)/float64(bounds.Dy()))
+	scaledWidth := int(float64(bounds.Dx()) * scale)
+	scaledHeight := int(float64(bounds.Dy()) * scale)
+
+	scaled := image.NewRGBA(image.Rect(0, 0, scaledWidth, scaledHeight))
+	xdraw.CatmullRom.Scale(scaled, scaled.Bounds(), src, bounds, xdraw.Over, nil)
+
+	dst := image.NewRGBA(image.Rect(0, 0, width, height))
+	offset := image.Point{X: (scaledWidth - width) / 2, Y: (scaledHeight - height) / 2}
+	draw.Draw(dst, dst.Bounds(), scaled, offset, draw.Src)
 	return dst
 }
 
@@ -102,4 +131,12 @@ func addWatermark(src image.Image, text string) image.Image {
 		draw.Draw(dst, image.Rect(x, rect.Min.Y+12, x+6, rect.Max.Y-12), &image.Uniform{C: color.RGBA{R: shade, G: shade, B: shade, A: 220}}, image.Point{}, draw.Over)
 	}
 	return dst
+}
+
+func encodeJPEG(src image.Image, quality int) ([]byte, error) {
+	var out bytes.Buffer
+	if err := jpeg.Encode(&out, src, &jpeg.Options{Quality: quality}); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
 }
