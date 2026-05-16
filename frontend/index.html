@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ImageProcessor</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="topbar">
+        <div>
+          <p class="eyebrow">ImageProcessor</p>
+          <h1>Фоновая обработка изображений</h1>
+        </div>
+        <form id="upload-form" class="upload-form">
+          <input id="image-input" name="image" type="file" accept="image/png,image/jpeg,image/gif" />
+          <button type="submit">Загрузить</button>
+        </form>
+      </section>
+
+      <section>
+        <div id="gallery" class="gallery"></div>
+      </section>
+    </main>
+
+    <template id="image-card-template">
+      <article class="image-card">
+        <div class="preview">
+          <span class="placeholder">В обработке</span>
+          <img alt="" />
+        </div>
+        <div class="meta">
+          <div>
+            <strong class="name"></strong>
+            <span class="status"></span>
+          </div>
+          <button class="delete" type="button">Удалить</button>
+        </div>
+      </article>
+    </template>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
